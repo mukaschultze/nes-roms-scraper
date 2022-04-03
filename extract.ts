@@ -28,12 +28,12 @@ import { Extras, ROM } from "./rom";
 const distinctArray = <T extends string | number>(arr: Array<T>) => [...new Set(arr)];
 
 const BASE_URL = "https://www.consoleroms.com";
-const CONCURRENT_REQUESTS = 50;
+const CONCURRENT_REQUESTS = 10;
 
 const fetch$ = (url: RequestInfo, init?: RequestInit) =>
   defer(() => fetch(typeof url === "string" && !url.startsWith("http") ? `${BASE_URL}${url}` : url, init)).pipe(
-    timeout(10000),
-    retry(15),
+    // timeout(10000),
+    // retry({ count: 15, delay: (err, c) => timer(c * 2 * 1000), resetOnSuccess: true }),
     tap({ error: (err) => console.error("Failed to download", url, err) }),
     catchError(() => EMPTY)
   );
@@ -67,8 +67,12 @@ const fetchPage = (url: string) => {
       exists
         ? fs.readFile(fileName, "utf8")
         : fetch$(url).pipe(
+            timeout(4000),
             switchMap((req) => req.text()),
-            tap((hmtl) => fs.writeFile(fileName, hmtl))
+            tap((hmtl) => fs.writeFile(fileName, hmtl)),
+            retry(10),
+            tap({ error: (err) => console.error("Failed to download HTML", url, err) }),
+            catchError(() => EMPTY)
           )
     ),
     map((html) => parseHtml(html))
@@ -173,7 +177,10 @@ const downloadFile = (url: string, output: string) => {
             map((buf) => new Uint8Array(buf)),
             switchMap(async (data) => {
               await fs.writeFile(fileName, data);
-            })
+            }),
+            retry(10),
+            tap({ error: (err) => console.error("Failed to download image", url, err) }),
+            catchError(() => EMPTY)
           )
     ),
     map(() => url)
