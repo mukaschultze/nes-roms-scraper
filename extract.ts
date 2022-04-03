@@ -11,6 +11,7 @@ import {
   EMPTY,
   firstValueFrom,
   from,
+  lastValueFrom,
   map,
   mergeMap,
   MonoTypeOperatorFunction,
@@ -158,8 +159,6 @@ const roms = await firstValueFrom(
   )
 );
 
-await fs.writeFile("./output/roms.json", JSON.stringify(roms, null, 2));
-
 const downloadFile = (url: string, output: string) => {
   const fileName = path.join(output, url.split("/").pop()!);
   return of(null).pipe(
@@ -198,17 +197,29 @@ const downloadMany = (urls: Array<string>, output: string) =>
 const thumbsUrls = distinctArray(roms.map((rom) => rom.thumbnail).filter((url) => url));
 const imageUrls = distinctArray(roms.map((rom) => rom.extras.image).filter((url) => url));
 
+const filenameMap: Record<string, string> = {};
 const downloadUrls = distinctArray(roms.flatMap((rom) => rom.extras.downloadUrl));
 const romsUrl = from(downloadUrls).pipe(
-  mergeMap((url) => fetchPage(url), CONCURRENT_REQUESTS),
-  map((dom) => dom.querySelector("a[rel='nofollow']")?.attributes.href ?? ""),
+  mergeMap(
+    (url) =>
+      fetchPage(url).pipe(
+        map((dom) => dom.querySelector("a[rel='nofollow']")?.attributes.href ?? ""),
+        tap((href) => (filenameMap[url] = href))
+      ),
+    CONCURRENT_REQUESTS
+  ),
   progress(downloadUrls.length, () => `Fetching ROMs download URLs`),
   toArray(),
   map((urls) => distinctArray(urls.filter((url) => url)))
 );
 
-concat(
-  downloadMany(thumbsUrls, "./output/thumbs"),
-  downloadMany(imageUrls, "./output/images"),
-  romsUrl.pipe(switchMap((romsUrl) => downloadMany(romsUrl, "./output/roms")))
-).subscribe();
+await lastValueFrom(
+  concat(
+    downloadMany(thumbsUrls, "./output/thumbs"),
+    downloadMany(imageUrls, "./output/images"),
+    romsUrl.pipe(switchMap((romsUrl) => downloadMany(romsUrl, "./output/roms")))
+  )
+);
+
+await fs.writeFile("./output/roms.json", JSON.stringify(roms, null, 2));
+await fs.writeFile("./output/roms-map.json", JSON.stringify(filenameMap, null, 2));
